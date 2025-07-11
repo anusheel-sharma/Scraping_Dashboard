@@ -1,139 +1,73 @@
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+"""
+FINRA Reg-SHO daily short-sale volume scraper
+============================================
+
+• Downloads all Consolidated-NMS files (CNMS) from 2020-01-01 to today.
+• Handles both plain-text (*.txt) and gzip-compressed (*.txt.gz) days.
+• Skips holidays / missing files gracefully.
+• Returns one DataFrame with columns:
+      ['date', 'symbol', 'short_volume', 'total_volume', 'short_exempt_volume']
+• Saves a local CSV snapshot so you don’t hit FINRA on every re-run.
+"""
+
+import datetime as dt
+import gzip
+import io
+import os
 import time
-from typing import Dict, List, Optional
+import requests
+import pandas as pd
 
-class YahooFinanceAnalysisScraper:
-    def __init__(self):
-        # Set up headers to mimic a real browser request
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive'
-        }
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+# ---------- 1. CONFIG --------------------------------------------------------
+START_DATE = dt.date(2025, 7, 7)
+END_DATE = dt.date.today()
+MARKET_CODE = "CNMS"
+OUTPUT_CSV = f"{MARKET_CODE}_shortvol_2020to{END_DATE}.csv"
+RATE_LIMIT = 0.35                                           # seconds between requests
+USER_AGENT = "short-sale-scraper/0.1 (+github.com/anusheel-sharma"
+
+# ----------- 2. DOWNLOAD ONE DAY ----------------------------------------------
+def fetch_one(date: dt.date) -> bytes | None:
+    """
+    Try both *.txt and *.txt.gz; return raw *plain-text* bytes, or None if 404/denied.
+    """
+    ymd = date.strftime("%Y%m%d")
+    base = f"https://cdn.finra.org/equity/regsho/daily/{MARKET_CODE}shvol{ymd}"
+    session = requests.Session()
+    session.headers["User-Agent"] = USER_AGENT
+
+    for suffix, decompress in ((".txt", False), ('.txt.gz', True)):
+        url = base + suffix
+        r = session.get(url, timeout=20)
+        if r.status_code == 200 and b"Access Denied" not in r.content:
+            raw = gzip.decompress(r.content) if decompress else r.content
+            return raw
+    return None
+
+# ----------- 3. MAIN LOOP -----------------------------------------------------
+all_frames = []
+current = START_DATE
+one_day = dt.timedelta(days=1)
+
+while current <= END_DATE:
+    raw = fetch_one(current)
+    if raw:
+        buf = io.BytesIO(raw)
+        df = pd.read_csv(buf, sep='|').rename(columns=str.lower)
+
+        df["date"] = current
+        all_frames.append(df)
+        print(f"{current} - {len(df):5d} rows")
+        time.sleep(RATE_LIMIT)
+    else:
+        # Holiday or missing file
+        print(f"{current} - No file")
     
-    def scrape_ticker_analysis(self, ticker: str) -> Dict[str, pd.DataFrame]:
-        """
-        Scrapes analysis data for a given stock ticker.
-        
-        Args:
-            ticker (str): Stock ticker symbol (e.g., 'PG', 'AAPL')
-        
-        Returns:
-            Dict[str,pd.DataFrame]: Dictionary containing scraped tables
-        """
-        url = f"https://uk.finance.yahoo.com/quote/{ticker}/analysis/"
-
-        try:
-            # Make the request
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-
-            # Parse HTML
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Dictionary to store all scraped tables
-            tables_data = {}
-
-            sections = [
-                'earningsEstimate', 
-                'earningsHistory',
-                'revenueEstimate',
-                'epsRevisions',
-                'epsTrend',
-                'growthEstimate'
-            ]
-                
-            # Find tables for different sections
-            for section_name in sections:
-                    section = soup.find('section', {'data-testid': section_name})
-                    if section:
-                        table = self._extract_table_from_section(section)
-                        if table is not None:
-                            tables_data[section_name] = table
-            
-            return tables_data
-            
-
-        except requests.RequestException as e:
-            print(f"Error fetching data for {ticker}: {e}")
-            return {}
-        except Exception as e:
-            print(f"Error processing data for {ticker}: {e}")
-            return {}
-
-    def _extract_table_from_section(self, section) -> Optional[pd.DataFrame]:
-        """
-        Extract table data from a section element
-        Args:
-            section: BeautifulSoup element containing the section
-        
-        Returns:
-            pd.DataFrame or None: Extracted table data
-        
-        """
-
-        try:
-            # Find table within the section
-            table = section.find('table')
-            if not table:
-                 return None
-            
-            # Extract headers
-            headers = []
-            thead = table.find('thead')
-            if thead:
-                header_row = thead.find('tr')
-                if header_row:
-                    headers = [th.get_text(strip=True) for th in header_row.find_all('th')]
-
-            # Extract data rows
-            rows_data = []
-            tbody = table.find('tbody')
-            if tbody:
-                rows = tbody.find_all('trow')
-                for row in rows:
-                    cells = row.find_all('td')
-                    if cells:
-                        row_data = [cell.get_text(strip=True) for cell in cells]
-                        rows_data.append(row_data)
-
-            if headers and rows_data:
-                df = pd.DataFrame(rows_data, columns=headers)
-                return df
-
-        except Exception as e:
-             print(f"Error extracting table: {e}")
-             return None
-
-    def scrape_multiple_tickers(self, tickers: List[str], delay: float = 1.0) -> Dict[str, Dict[str, pd.DataFrame]]:
-        """
-        Scrapes analysis data for multiple tickers.
-
-        Args:
-            tickers (List[str]): List of ticker symboles
-            delay (float): Delay between requests in seconds
-        
-        Returns:
-            Dict[str,Dict[str,pd.DataFrame]]: Nested dictionary with ticker -> table_name -> DataFrame
-        """
-
-        all_data = {}
-        for ticker in tickers:
-            print(f"Scraping data for {ticker}...")
-            ticker_data = self.scrape_ticker_analysis(ticker)
-            if ticker_data:
-                all_data[ticker] = ticker_data
-                print(f"Successfully scraped {len(ticker_data)} tables for {ticker}")
-            else:
-                print(f"No data found for {ticker}")
-
-            # Add delay to be respectful to the server
-            time.sleep(delay)
-        
-        return all_data
+    current += one_day
+      
+# ---------- 4. CONCAT & SAVE -------------------------------------------------
+if not all_frames:
+    raise RuntimeError("No data downloaded – check internet / date range.")
+master = pd.concat(all_frames, ignore_index=True)
+master.to_csv(OUTPUT_CSV, index=False)
+print(f"\nSaved {len(master):,} rows ➜ {OUTPUT_CSV}")
