@@ -14,6 +14,7 @@ import yfinance as yf
 from typing import List
 import time
 import datetime as dt
+from pathlib import Path
 
 # =============================== 1. CONFIG =====================================
 START_DATE = dt.date(2024, 1, 1)
@@ -82,6 +83,43 @@ def download_ticker_data(tickers: List[str]) -> pd.DataFrame:
 
     return tidy
 
+def save_to_parquet(
+        df: pd.DataFrame,
+        out_path: str | Path,
+        compression: str = "snappy",
+        overwrite: bool = True
+) -> None:
+
+    """
+    Save *df* to a Parquet file.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The table you want to persist.
+    out_path : str or Path
+        Where to write the file, e.g. 'data/commodities.parquet'.
+    compression : {'snappy','zstd','brotli','gzip',None}
+        Codec passed to pandas.to_parquet (default = snappy, best mix of speed/size).
+    overwrite : bool
+        If False and the file exists, raise FileExistsError.
+
+    Notes
+    -----
+    • Requires 'pyarrow' ≥ 12.0 (or 'fastparquet') in your environment.
+    • Creates parent folders if they don’t exist.
+    • Writes with *index=False* so the filesystem is your only index.
+    """
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if out_path.exists() and not overwrite:
+        raise FileExistsError(f"{out_path} already exists (set overwrite=True to replace)")
+
+    df.to_parquet(out_path, engine="pyarrow", compression=compression, index=False)
+    print(f"✅  Saved {len(df):,} rows  ➜  {out_path}")
+
 
 # =============================== 3. MAIN FUNCTION =====================================
 
@@ -90,4 +128,6 @@ sp_tickers = get_sp500_list()
 equities = download_ticker_data(sp_tickers)
 commodities = download_ticker_data(COMMOD_TICKERS)
 
+# Combine dfs and export to parquet
 all_prices = pd.concat([equities, commodities], axis=0)
+save_to_parquet(all_prices, 'data/equity_commodity_data.parquet')
