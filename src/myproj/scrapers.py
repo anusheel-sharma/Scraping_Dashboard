@@ -69,5 +69,6 @@ while current <= END_DATE:
 if not all_frames:
     raise RuntimeError("No data downloaded – check internet / date range.")
 master = pd.concat(all_frames, ignore_index=True)
+master.drop('market', axis=1, inplace=True)     # Drop market/exchange column which is not required
 master.to_csv(OUTPUT_CSV, index=False)
 print(f"\nSaved {len(master):,} rows ➜ {OUTPUT_CSV}")
