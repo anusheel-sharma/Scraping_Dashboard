@@ -5,20 +5,9 @@ Yahoo Finance API Equity and Commodity Price Download
 
 Downloads prices for S&P 500 equities from 01-01-2020 to today
 Downloads commodity prices (XXXX) from 01-01-2020 to today
-Returns one DataFrame with 
+Returns one DataFrame with all data combined and exports to csv
 """
 
-"""
-FINRA Reg-SHO daily short-sale volume scraper
-============================================
-
-• Downloads all Consolidated-NMS files (CNMS) from 2020-01-01 to today.
-• Handles both plain-text (*.txt) and gzip-compressed (*.txt.gz) days.
-• Skips holidays / missing files gracefully.
-• Returns one DataFrame with columns:
-      ['date', 'symbol', 'short_volume', 'total_volume', 'short_exempt_volume']
-• Saves a local CSV snapshot so you don’t hit FINRA on every re-run.
-"""
 
 import pandas as pd
 import yfinance as yf
@@ -27,8 +16,15 @@ import time
 import datetime as dt
 
 # =============================== 1. CONFIG =====================================
-START = dt.date(2024, 1, 1)
-END = dt.date(2025, 7, 7)
+START_DATE = dt.date(2024, 1, 1)
+END_DATE = dt.date(2025, 7, 7)
+COMMOD_TICKERS = [
+    "GLD", "SLV", "CPER",               # Gold, Silver, Copper,
+    "UNG", "UGA", "BNO",                # energy feed-stocks - Natural gas, Gasoline, US Brent Oil
+    "ALUM", "PPLT", "PALL",             # metals - Aluminium, Platinum, Palladium
+    "CORN", "WEAT", "SOYB", "CANE",     # grains & sugar - Corn, Wheat, Soybeans, Sugar
+    "COTN.L", "COFF.L"                  # cotton, coffee
+]
 
 # =============================== 2. CORE FUNCTIONS =====================================
 
@@ -65,7 +61,11 @@ def download_ticker_data(tickers: List[str]) -> pd.DataFrame:
     """
 
     frames = []
-    chunksize = 30
+    if len(tickers) > 30:
+        chunksize = 30
+    else:
+        chunksize = len(tickers)
+    
     for i in range(0, len(tickers), chunksize):
         part = tickers[i:i+chunksize]
         print(f"fetching {len(part)} tickers…")
@@ -83,5 +83,11 @@ def download_ticker_data(tickers: List[str]) -> pd.DataFrame:
     return tidy
 
 
-# =============================== 3. MAIN LOOP =====================================
+# =============================== 3. MAIN FUNCTION =====================================
 
+# Download equity and commodities data
+sp_tickers = get_sp500_list()
+equities = download_ticker_data(sp_tickers)
+commodities = download_ticker_data(COMMOD_TICKERS)
+
+all_prices = pd.concat([equities, commodities], axis=0)
