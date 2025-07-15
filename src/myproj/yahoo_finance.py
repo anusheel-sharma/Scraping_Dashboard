@@ -3,9 +3,11 @@
 Yahoo Finance API Equity and Commodity Price Download
 =====================================================
 
-Downloads prices for S&P 500 equities from 01-01-2020 to today
-Downloads commodity prices (XXXX) from 01-01-2020 to today
-Returns one DataFrame with all data combined and exports to csv
+Downloads prices for S&P 500 equities from 01-01-2019 to today
+Downloads commodity prices (XXXX) from 01-01-2019 to today
+Downloads fundamental accounting data for S&P 500 equities for four annual accounting periods
+Returns one DataFrame with all price data combined and exports to parquet
+Returns another DataFrame with fundamental accounting data
 """
 
 
@@ -26,6 +28,14 @@ COMMOD_TICKERS = [
     "CORN", "WEAT", "SOYB", "CANE",     # grains & sugar - Corn, Wheat, Soybeans, Sugar
     "COTN.L", "COFF.L"                  # cotton, coffee
 ]
+ACCOUNTING_FUNDAMENTALS = {
+    'Operating Cash Flow': 'OCF',
+    'Capital Expenditure': 'Capex',
+    'Research And Development': 'R&D',
+    'Total Revenue': 'Revenue',
+    'Gross Profit': 'GrossProfit',
+    'Operating Income': 'OpProfit'
+}
 
 # =============================== 2. CORE FUNCTIONS =====================================
 
@@ -44,7 +54,7 @@ def get_sp500_list() -> List[str]:
 
     # Extract ticker symbols from wiki table and convert to list
     sp500_table = tables[0]
-    sp500_symbols = sp500_table['Symbol']
+    sp500_symbols = sp500_table['Symbol'].str.replace(".", "-", regex=False)
     tickers = sp500_symbols.tolist()
 
     return tickers
@@ -82,6 +92,58 @@ def download_ticker_data(tickers: List[str]) -> pd.DataFrame:
     tidy = wide.stack(level=1, future_stack=True).rename_axis(['Date', 'Ticker']).reset_index()
 
     return tidy
+
+def get_fundamentals(ticker: str) -> pd.DataFrame:
+    """
+    Create dataframe with fundamental accounting data for given ticker
+    which includes operating cash flow, capital expenditure, research and development,
+    revenue, gross profit and operating income for the last four annual periods.
+    """
+
+    # Download cash flow and income data for ticker
+    obj = yf.Ticker(ticker)
+    cash = obj.cashflow
+    fin = obj.financials
+    raw = pd.concat([cash, fin])
+
+    # Use intersection function to capture rows (e.g. Operating Cash Flow) 
+    # only if available in raw df without raising error
+    keep = raw.loc[raw.index.intersection(ACCOUNTING_FUNDAMENTALS.keys())]
+    keep.index = keep.index.map(ACCOUNTING_FUNDAMENTALS)                    # Create new index names
+
+    tidy = (
+        keep
+        .T                          # Dates become rows
+        .dropna(how='all')          # Remove rows with no data for all periods
+        .assign(Ticker=ticker)      # Create column for ticker      
+        .reset_index()
+        .rename(columns={'index': 'FiscalYear'}) 
+    )
+
+    return tidy
+
+def get_tickers_fundamentals(tickers: List[str]) -> pd.DataFrame:
+    """
+    For list of given tickers, return a DataFrame with relevant fundamental accounting
+    data for each ticker by period.
+    """
+
+    frames = []
+    for i, t in enumerate(tickers, start=1):
+        try:
+            fundamentals = get_fundamentals(t)
+            frames.append(fundamentals)
+        except Exception as e:
+            print(f"{t}: {e}")
+
+        # Print statement to update every 50 tickers
+        if i % 50 == 0 or i == len(tickers):
+            print(f"{i} / {len(tickers)} processed. Last {t}")
+
+        time.sleep(0.4)
+
+    fund_df = pd.concat(frames, ignore_index=True)
+    return fund_df
 
 def save_to_parquet(
         df: pd.DataFrame,
@@ -127,7 +189,9 @@ def save_to_parquet(
 sp_tickers = get_sp500_list()
 equities = download_ticker_data(sp_tickers)
 commodities = download_ticker_data(COMMOD_TICKERS)
+fundamentals = get_tickers_fundamentals(sp_tickers)
 
-# Combine dfs and export to parquet
+# Combine dfs and export to parquet. Keep fundamental in separate file
 all_prices = pd.concat([equities, commodities], axis=0)
 save_to_parquet(all_prices, 'data/raw/equity_commodity_data.parquet')
+save_to_parquet(fundamentals, 'data/raw/equity_fundamental_data.parquet')
