@@ -17,7 +17,7 @@ import datetime as dt
 from pathlib import Path
 
 # =============================== 1. CONFIG =====================================
-START_DATE = dt.date(2024, 1, 1)
+START_DATE = dt.date(2019, 1, 1)
 END_DATE = dt.date(2025, 7, 7)
 COMMOD_TICKERS = [
     "GLD", "SLV", "CPER",               # Gold, Silver, Copper,
@@ -130,4 +130,4 @@ commodities = download_ticker_data(COMMOD_TICKERS)
 
 # Combine dfs and export to parquet
 all_prices = pd.concat([equities, commodities], axis=0)
-save_to_parquet(all_prices, 'data/equity_commodity_data.parquet')
+save_to_parquet(all_prices, 'data/raw/equity_commodity_data.parquet')
