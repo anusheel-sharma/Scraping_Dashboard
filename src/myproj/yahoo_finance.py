@@ -179,7 +179,7 @@ def save_to_parquet(
     if out_path.exists() and not overwrite:
         raise FileExistsError(f"{out_path} already exists (set overwrite=True to replace)")
 
-    df.to_parquet(out_path, engine="pyarrow", compression=compression, index=False)
+    df.to_parquet(out_path, engine="pyarrow", compression=compression, index=False, coerce_timestamps="us")
     print(f"✅  Saved {len(df):,} rows  ➜  {out_path}")
 
 
