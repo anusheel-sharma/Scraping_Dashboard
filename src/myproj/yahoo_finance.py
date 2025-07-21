@@ -34,7 +34,8 @@ ACCOUNTING_FUNDAMENTALS = {
     'Research And Development': 'R&D',
     'Total Revenue': 'Revenue',
     'Gross Profit': 'GrossProfit',
-    'Operating Income': 'OpProfit'
+    'Operating Income': 'OpProfit',
+    'Pretax Income': 'Pretax Income'
 }
 
 # =============================== 2. CORE FUNCTIONS =====================================
@@ -190,6 +191,10 @@ sp_tickers = get_sp500_list()
 equities = download_ticker_data(sp_tickers)
 commodities = download_ticker_data(COMMOD_TICKERS)
 fundamentals = get_tickers_fundamentals(sp_tickers)
+
+# Create marker for price type
+commodities['AssetType'] = 'Commodity'
+equities['AssetType'] = 'Equity'
 
 # Combine dfs and export to parquet. Keep fundamental in separate file
 all_prices = pd.concat([equities, commodities], axis=0)
